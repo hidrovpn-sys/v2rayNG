@@ -19,7 +19,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      - uses: android-actions/setup-android@v3
       - name: Build hev-socks5-tunnel
         run: bash compile-hevtun.sh
       - name: Build libv2ray
