@@ -5,6 +5,8 @@ on:
     branches: [master]
     paths:
       - ".github/workflows/build-ng.yml"
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,20 +29,4 @@ jobs:
         run: |
           go install golang.org/x/mobile/cmd/gomobile@latest
           go install golang.org/x/mobile/cmd/gobind@latest
-          export PATH="$PATH:$(go env GOPATH)/bin"
-          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
-          gomobile init
-          cd AndroidLibXrayLite
-          go mod tidy
-          gomobile bind -v -androidapi 24 -trimpath -ldflags='-s -w -buildid= -checklinkname=0' -o libv2ray.aar ./
-          mkdir -p ../V2rayNG/app/libs
-          cp libv2ray.aar ../V2rayNG/app/libs/
-      - name: Build APK
-        run: |
-          cd V2rayNG
-          chmod +x gradlew
-          ./gradlew assembleFdroidDebug
-      - uses: actions/upload-artifact@v4
-        with:
-          name: apk
-          path: "V2rayNG/app/build/outputs/apk/**/*arm64*.apk"
+          export PATH="$PATH:$(go env
