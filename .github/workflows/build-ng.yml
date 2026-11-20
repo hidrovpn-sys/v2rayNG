@@ -1,50 +1,95 @@
+
 name: Build v2rayNG
+
 on:
   workflow_dispatch:
   push:
     branches: [master]
     paths:
       - ".github/workflows/build-ng.yml"
+
 permissions:
   contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source
+        uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: actions/setup-java@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-      - uses: actions/setup-go@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
           go-version: stable
+
       - name: Build hev-socks5-tunnel
         run: |
           export NDK_HOME=$ANDROID_NDK_LATEST_HOME
           bash compile-hevtun.sh
+
       - name: Build libv2ray
         run: |
           export ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME
           export PATH=$PATH:$HOME/go/bin
+
           go install golang.org/x/mobile/cmd/gomobile@latest
           go install golang.org/x/mobile/cmd/gobind@latest
+
           gomobile init
+
           cd AndroidLibXrayLite
           go mod tidy
-          gomobile bind -v -androidapi 24 -trimpath -ldflags='-s -w -buildid= -checklinkname=0' -o libv2ray.aar ./
+
+          gomobile bind -v -androidapi 24 -trimpath \
+            -ldflags='-s -w -buildid= -checklinkname=0' \
+            -o libv2ray.aar ./
+
           mkdir -p ../V2rayNG/app/libs
           cp libv2ray.aar ../V2rayNG/app/libs/
-      - name: Build APK
+
+      - name: Build all APK variants
         run: |
           cd V2rayNG
           chmod +x gradlew
-          ./gradlew assembleFdroidDebug
-      - name: Publish APK to Releases
+          ./gradlew --no-daemon clean assembleFdroidDebug
+
+      - name: Check APK files
+        run: |
+          APK_DIR="V2rayNG/app/build/outputs/apk/fdroid/debug"
+
+          echo "APK files:"
+          find "$APK_DIR" -type f -name "*.apk" -exec ls -lh {} \;
+
+          APK_COUNT=$(find "$APK_DIR" -type f -name "*.apk" | wc -l)
+
+          if [ "$APK_COUNT" -eq 0 ]; then
+            echo "ERROR: No APK files found!"
+            exit 1
+          fi
+
+          for apk in "$APK_DIR"/*.apk; do
+            [ -f "$apk" ] || continue
+            echo "Checking: $apk"
+            unzip -t "$apk" >/dev/null
+          done
+
+          echo "APK checks completed."
+
+      - name: Publish all APKs to Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Build ${{ github.run_number }}
-          files: "V2rayNG/app/build/outputs/apk/fdroid/debug/*arm64*.apk"
+          name: SUFFER VPN Build ${{ github.run_number }}
+          files: "V2rayNG/app/build/outputs/apk/fdroid/debug/*.apk"
+          fail_on_unmatched_files: true
+          
