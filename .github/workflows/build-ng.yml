@@ -57,35 +57,50 @@ jobs:
           mkdir -p ../V2rayNG/app/libs
           cp libv2ray.aar ../V2rayNG/app/libs/
 
-      - name: Build all APK variants
+      - name: Build APK
         run: |
           cd V2rayNG
           chmod +x gradlew
           ./gradlew --no-daemon clean assembleFdroidDebug
 
-      - name: Check APK files
+      - name: Verify APK signatures
+        shell: bash
         run: |
           APK_DIR="V2rayNG/app/build/outputs/apk/fdroid/debug"
 
-          echo "APK files:"
-          find "$APK_DIR" -type f -name "*.apk" -exec ls -lh {} \;
+          mapfile -t APK_FILES < <(find "$APK_DIR" -type f -name "*.apk")
 
-          APK_COUNT=$(find "$APK_DIR" -type f -name "*.apk" | wc -l)
-
-          if [ "$APK_COUNT" -eq 0 ]; then
+          if [ "${#APK_FILES[@]}" -eq 0 ]; then
             echo "ERROR: No APK files found!"
             exit 1
           fi
 
-          for apk in "$APK_DIR"/*.apk; do
-            [ -f "$apk" ] || continue
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" \
+            -type f -name apksigner | sort -V | tail -n 1)
+
+          if [ -z "$APKSIGNER" ]; then
+            echo "ERROR: apksigner not found!"
+            exit 1
+          fi
+
+          echo "Using: $APKSIGNER"
+
+          for apk in "${APK_FILES[@]}"; do
+            echo "--------------------------------"
             echo "Checking: $apk"
-            unzip -t "$apk" >/dev/null
+
+            "$APKSIGNER" verify --verbose --print-certs "$apk"
+
+            if [ $? -ne 0 ]; then
+              echo "ERROR: APK signature verification failed!"
+              exit 1
+            fi
+
+            sha256sum "$apk"
+            echo "APK signature is valid."
           done
 
-          echo "APK checks completed."
-
-      - name: Publish all APKs to Releases
+      - name: Publish APKs to Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
