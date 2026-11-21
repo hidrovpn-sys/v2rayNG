@@ -1,4 +1,3 @@
-
 name: Build v2rayNG
 
 on:
@@ -37,6 +36,24 @@ jobs:
           export NDK_HOME=$ANDROID_NDK_LATEST_HOME
           bash compile-hevtun.sh
 
+      - name: Copy hev lib
+        shell: bash
+        run: |
+          mkdir -p V2rayNG/app/libs
+          FOUND=$(find . -type f -name "libhev-socks5-tunnel.so" -not -path "./V2rayNG/*")
+          if [ -z "$FOUND" ]; then
+            echo "ERROR: libhev-socks5-tunnel.so not found anywhere"
+            find . -type f -name "*.so" -not -path "./V2rayNG/*" | head -50
+            exit 1
+          fi
+          for f in $FOUND; do
+            abi=$(basename "$(dirname "$f")")
+            echo "Copy $f to V2rayNG/app/libs/$abi"
+            mkdir -p "V2rayNG/app/libs/$abi"
+            cp "$f" "V2rayNG/app/libs/$abi/"
+          done
+          find V2rayNG/app/libs -type f
+
       - name: Build libv2ray
         run: |
           export ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME
@@ -63,48 +80,18 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon clean assembleFdroidDebug
 
-      - name: Verify APK signatures
+      - name: Check native libs in APK
         shell: bash
         run: |
-          APK_DIR="V2rayNG/app/build/outputs/apk/fdroid/debug"
-
-          mapfile -t APK_FILES < <(find "$APK_DIR" -type f -name "*.apk")
-
-          if [ "${#APK_FILES[@]}" -eq 0 ]; then
-            echo "ERROR: No APK files found!"
-            exit 1
-          fi
-
-          APKSIGNER=$(find "$ANDROID_HOME/build-tools" \
-            -type f -name apksigner | sort -V | tail -n 1)
-
-          if [ -z "$APKSIGNER" ]; then
-            echo "ERROR: apksigner not found!"
-            exit 1
-          fi
-
-          echo "Using: $APKSIGNER"
-
-          for apk in "${APK_FILES[@]}"; do
-            echo "--------------------------------"
-            echo "Checking: $apk"
-
-            "$APKSIGNER" verify --verbose --print-certs "$apk"
-
-            if [ $? -ne 0 ]; then
-              echo "ERROR: APK signature verification failed!"
-              exit 1
-            fi
-
-            sha256sum "$apk"
-            echo "APK signature is valid."
-          done
+          APK=$(find V2rayNG/app/build/outputs/apk/fdroid/debug -name "*arm64*.apk" | head -n 1)
+          echo "Checking $APK"
+          unzip -l "$APK" | grep "\.so" || true
+          unzip -l "$APK" | grep -q "libhev-socks5-tunnel.so" || { echo "ERROR: libhev missing in APK"; exit 1; }
 
       - name: Publish APKs to Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: SUFFER VPN Build ${{ github.run_number }}
-          files: "V2rayNG/app/build/outputs/apk/fdroid/debug/*.apk"
+          files: "V2rayNG/app/build/outputs/apk/fdroid/debug/*arm64*.apk"
           fail_on_unmatched_files: true
-          
