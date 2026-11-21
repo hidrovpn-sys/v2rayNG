@@ -1,3 +1,4 @@
+
 name: Build v2rayNG
 
 on:
@@ -40,19 +41,75 @@ jobs:
         shell: bash
         run: |
           mkdir -p V2rayNG/app/libs
+
           FOUND=$(find . -type f -name "libhev-socks5-tunnel.so" -not -path "./V2rayNG/*")
+
           if [ -z "$FOUND" ]; then
-            echo "ERROR: libhev-socks5-tunnel.so not found anywhere"
+            echo "ERROR: libhev-socks5-tunnel.so not found"
             find . -type f -name "*.so" -not -path "./V2rayNG/*" | head -50
             exit 1
           fi
-          for f in $FOUND; do
+
+          while IFS= read -r f; do
             abi=$(basename "$(dirname "$f")")
             echo "Copy $f to V2rayNG/app/libs/$abi"
             mkdir -p "V2rayNG/app/libs/$abi"
             cp "$f" "V2rayNG/app/libs/$abi/"
-          done
+          done <<< "$FOUND"
+
           find V2rayNG/app/libs -type f
+
+      - name: Prepare geo files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ASSETS="V2rayNG/app/src/main/assets"
+          mkdir -p "$ASSETS"
+
+          echo "--- Source references ---"
+          grep -rn "geoip-only-cn-private" V2rayNG/app/src/main \
+            --include="*.kt" \
+            --include="*.json" \
+            --include="*.xml" | head -20 || true
+
+          echo "--- Copy existing geo files ---"
+
+          for f in geoip.dat geosite.dat; do
+            if [ -f "AndroidLibXrayLite/assets/$f" ]; then
+              cp -f "AndroidLibXrayLite/assets/$f" "$ASSETS/$f"
+            fi
+          done
+
+          echo "--- Download missing geo files ---"
+
+          if [ ! -s "$ASSETS/geoip.dat" ]; then
+            curl -fL --retry 3 \
+              -o "$ASSETS/geoip.dat" \
+              https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
+          fi
+
+          if [ ! -s "$ASSETS/geosite.dat" ]; then
+            curl -fL --retry 3 \
+              -o "$ASSETS/geosite.dat" \
+              https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat
+          fi
+
+          if [ ! -s "$ASSETS/geoip-only-cn-private.dat" ]; then
+            curl -fL --retry 3 \
+              -o "$ASSETS/geoip-only-cn-private.dat" \
+              https://raw.githubusercontent.com/Loyalsoldier/geoip/release/geoip-only-cn-private.dat
+          fi
+
+          echo "--- Final geo files ---"
+          ls -lh "$ASSETS"
+
+          for f in geoip.dat geosite.dat geoip-only-cn-private.dat; do
+            test -s "$ASSETS/$f" || {
+              echo "ERROR: $f is missing or empty"
+              exit 1
+            }
+          done
 
       - name: Build libv2ray
         run: |
@@ -80,13 +137,39 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon clean assembleFdroidDebug
 
-      - name: Check native libs in APK
+      - name: Check native libs and geo files in APK
         shell: bash
         run: |
           APK=$(find V2rayNG/app/build/outputs/apk/fdroid/debug -name "*arm64*.apk" | head -n 1)
-          echo "Checking $APK"
-          unzip -l "$APK" | grep "\.so" || true
-          unzip -l "$APK" | grep -q "libhev-socks5-tunnel.so" || { echo "ERROR: libhev missing in APK"; exit 1; }
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK not found"
+            exit 1
+          fi
+
+          echo "Checking APK: $APK"
+
+          CONTENTS=$(unzip -Z1 "$APK")
+
+          echo "--- Native libraries ---"
+          echo "$CONTENTS" | grep "\.so" || true
+
+          echo "$CONTENTS" | grep -q "libhev-socks5-tunnel.so" || {
+            echo "ERROR: libhev missing in APK"
+            exit 1
+          }
+
+          echo "--- Geo files ---"
+
+          for f in geoip.dat geosite.dat geoip-only-cn-private.dat; do
+            echo "$CONTENTS" | grep -Fxq "assets/$f" || {
+              echo "ERROR: $f missing in APK"
+              exit 1
+            }
+            echo "OK: $f"
+          done
+
+          echo "SUCCESS: Native and geo files verified"
 
       - name: Publish APKs to Releases
         uses: softprops/action-gh-release@v2
@@ -95,3 +178,4 @@ jobs:
           name: SUFFER VPN Build ${{ github.run_number }}
           files: "V2rayNG/app/build/outputs/apk/fdroid/debug/*arm64*.apk"
           fail_on_unmatched_files: true
+          
